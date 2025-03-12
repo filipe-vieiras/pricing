@@ -283,10 +283,18 @@ class StaysPriceMonitor:
             if self.handle_captcha():
                 print("Captcha tratado. Continuando...")
             
+            # Define o intervalo de acomodações para extrair (de 5 a 199)
+            accommodation_values = list(range(5, 200))
+            
+            # Para evitar sobrecarga, podemos usar um passo maior
+            # Por exemplo, pegar a cada 5 valores: 5, 10, 15, 20, etc.
+            # Descomente a linha abaixo se quiser usar um passo maior
+            # accommodation_values = list(range(5, 200, 5))
+            
             # Extrai preços para cada configuração de acomodações
-            for accommodations in [5, 20, 100]:
+            for i, accommodations in enumerate(accommodation_values):
                 # Adiciona um atraso aleatório entre as extrações para evitar bloqueios
-                if accommodations != 5:  # Não precisamos de atraso para a primeira execução
+                if i > 0:  # Não precisamos de atraso para a primeira execução
                     time.sleep(random.uniform(2, 4))
                 
                 # Extrai os preços para a configuração atual
@@ -294,23 +302,32 @@ class StaysPriceMonitor:
                 
                 # Após cada extração, voltamos à página inicial para garantir um estado limpo
                 # Isso garante que o botão será clicado novamente para cada configuração
-                if accommodations != 100:  # Não precisamos recarregar após a última extração
+                if accommodations != accommodation_values[-1]:  # Não precisamos recarregar após a última extração
                     print("Recarregando a página para a próxima configuração...")
                     self.driver.refresh()
                     time.sleep(3)  # Aguarda o carregamento da página
+                
+                # Opcional: salvar dados parciais a cada 10 extrações para evitar perda de dados
+                if i > 0 and i % 10 == 0:
+                    print(f"Salvando dados parciais após {i} extrações...")
+                    self.save_to_excel(partial=True)
             
             # Salva os dados extraídos
             self.save_to_excel()
             
         except Exception as e:
             print(f"Erro durante a execução: {e}")
+            # Tenta salvar os dados coletados até o momento em caso de erro
+            if self.data:
+                print("Salvando dados coletados até o momento...")
+                self.save_to_excel(error=True)
         
         finally:
             # Fecha o navegador
             self.driver.quit()
             print("Monitoramento concluído.")
 
-    def save_to_excel(self):
+    def save_to_excel(self, partial=False, error=False):
         """Salva os dados extraídos em um arquivo Excel"""
         if not self.data:
             print("Nenhum dado para salvar.")
@@ -321,7 +338,13 @@ class StaysPriceMonitor:
         
         # Define o nome do arquivo com timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"/Users/filipevieira/Apps/pricing3/stays_prices_{timestamp}.xlsx"
+        filename_prefix = "stays_prices"
+        if partial:
+            filename_prefix += "_partial"
+        if error:
+            filename_prefix += "_error"
+        
+        filename = f"/Users/filipevieira/Apps/pricing3/{filename_prefix}_{timestamp}.xlsx"
         
         # Salva o DataFrame em um arquivo Excel
         df.to_excel(filename, index=False)
