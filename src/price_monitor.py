@@ -141,6 +141,7 @@ class StaysPriceMonitor:
                 known_plan_names = ["SUPER ANFITRIÃO", "PROFISSIONAL", "ADMINISTRADOR", "AGÊNCIA"]
                 
                 # Extrai os dados de cada plano
+                valid_data = []
                 for i, container in enumerate(plan_containers):
                     try:
                         # Verifica se este container realmente contém informações de preço
@@ -167,6 +168,10 @@ class StaysPriceMonitor:
                             if i < len(known_plan_names):
                                 plan_name = known_plan_names[i]
                         
+                        # Pula entradas com "Plano 12" ou outros planos genéricos não desejados
+                        if plan_name == "Plano 12" or (plan_name.startswith("Plano ") and int(plan_name.split()[1]) > 4):
+                            continue
+                        
                         # Extrai o preço mensal
                         price_text = "N/A"
                         try:
@@ -183,6 +188,10 @@ class StaysPriceMonitor:
                                         pass
                         except:
                             pass
+                        
+                        # Se não encontrou um preço válido, pula este container
+                        if price_text == "N/A" or not price_text:
+                            continue
                         
                         # Extrai a porcentagem
                         percentage = "N/A"
@@ -227,8 +236,8 @@ class StaysPriceMonitor:
                             except:
                                 pass
                         
-                        # Adiciona os dados extraídos
-                        self.data.append({
+                        # Adiciona os dados extraídos à lista temporária
+                        valid_data.append({
                             "accommodations": accommodations,
                             "plan_name": plan_name,
                             "price": price_text,
@@ -243,7 +252,10 @@ class StaysPriceMonitor:
                     except Exception as e:
                         print(f"Erro ao extrair dados do container {i+1}: {e}")
                 
-                print(f"Extraídos dados de {len(self.data)} planos para {accommodations} acomodações.")
+                # Adiciona apenas os dados válidos à lista principal
+                self.data.extend(valid_data)
+                
+                print(f"Extraídos dados de {len(valid_data)} planos válidos para {accommodations} acomodações.")
                 
             except Exception as e:
                 print(f"Erro ao extrair os elementos de preço: {e}")

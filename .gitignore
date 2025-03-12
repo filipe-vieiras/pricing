@@ -1,0 +1,29 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Excel output files
+*.xlsx
+*.xls
+stays_prices_*.xlsx
+
+# Environment variables
+.env
+
+# Chrome driver
+chromedriver
+chromedriver.exe
+
+# IDE files
+.idea/
+.vscode/
+
+# OS specific files
+.DS_Store
+Thumbs.db
