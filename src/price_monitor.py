@@ -88,13 +88,26 @@ class StaysPriceMonitor:
             # Se não encontrou captcha, continua normalmente
             return False
     
-    def extract_prices(self, accommodations):
+    def extract_prices(self, accommodations, max_retries=3):
         """Extrai os preços para uma configuração específica de acomodações"""
-        try:
-            print(f"Extraindo preços para {accommodations} acomodações...")
-            
-            # Localiza o campo de entrada para quantidade (qty)
+        retries = 0
+        while retries < max_retries:
             try:
+                print(f"Extraindo preços para {accommodations} acomodações (tentativa {retries+1}/{max_retries})...")
+                
+                # Verifica se o driver ainda está ativo
+                try:
+                    # Tenta acessar o título da página para verificar se a sessão está ativa
+                    self.driver.title
+                except Exception as e:
+                    print(f"Sessão do navegador perdida: {e}")
+                    print("Reiniciando o navegador...")
+                    self.setup_driver()
+                    self.driver.get(self.url)
+                    time.sleep(5)
+                    self.login_if_needed()
+                    
+                # Localiza o campo de entrada para quantidade (qty)
                 # Tenta encontrar o campo de entrada pelo ID
                 qty_input = WebDriverWait(self.driver, 10).until(
                     EC.element_to_be_clickable((By.ID, "qty"))
@@ -118,15 +131,17 @@ class StaysPriceMonitor:
                 calculate_button.click()
                 print("Botão 'calcular os melhores preços' clicado.")
                 
-                # Aguarda o carregamento dos resultados
-                time.sleep(5)
+                # MELHORIA 1: Aguarda o carregamento dos resultados de forma mais robusta
+                try:
+                    WebDriverWait(self.driver, 15).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, ".price"))
+                    )
+                    time.sleep(2)  # Pequeno atraso adicional para garantir carregamento completo
+                except TimeoutException:
+                    print("Timeout esperando pelos resultados de preço.")
+                    # Continua mesmo assim, talvez os elementos estejam presentes mas não detectados
                 
-            except Exception as e:
-                print(f"Não foi possível definir {accommodations} acomodações ou clicar no botão de cálculo: {e}")
-                return
-            
-            # Extrai os dados dos cards de preço com base na estrutura HTML fornecida
-            try:
+                # Extrai os dados dos cards de preço com base na estrutura HTML fornecida
                 # Procura por todos os elementos de plano (cada plano está em um div elementor-widget-wrap)
                 plan_containers = self.driver.find_elements(By.CSS_SELECTOR, "div.elementor-widget-wrap.elementor-element-populated")
                 
@@ -252,18 +267,63 @@ class StaysPriceMonitor:
                     except Exception as e:
                         print(f"Erro ao extrair dados do container {i+1}: {e}")
                 
+                # CORREÇÃO: Movido para fora do loop de containers
                 # Adiciona apenas os dados válidos à lista principal
                 self.data.extend(valid_data)
-                
                 print(f"Extraídos dados de {len(valid_data)} planos válidos para {accommodations} acomodações.")
                 
+                # MELHORIA 2: Verifica se dados foram coletados antes de prosseguir
+                if not valid_data:
+                    print(f"Nenhum dado válido encontrado para {accommodations} acomodações. Tentando novamente...")
+                    retries += 1
+                    continue
+                
+                # Se chegou até aqui sem erros, sai do loop de tentativas
+                return
+                
             except Exception as e:
-                print(f"Erro ao extrair os elementos de preço: {e}")
-            
-        except Exception as e:
-            print(f"Erro ao extrair preços para {accommodations} acomodações: {e}")
-            print(f"Detalhes do erro: {str(e)}")
-    
+                print(f"Erro na tentativa {retries+1}: {e}")
+                retries += 1
+                if retries < max_retries:
+                    print(f"Tentando novamente em 10 segundos...")
+                    time.sleep(10)
+                    # Recarrega a página para tentar novamente
+                    try:
+                        self.driver.refresh()
+                        time.sleep(5)
+                    except:
+                        # Se falhar ao recarregar, tenta reiniciar o navegador
+                        print("Falha ao recarregar. Reiniciando o navegador...")
+                        try:
+                            self.driver.quit()
+                        except:
+                            pass
+                        self.setup_driver()
+                        self.driver.get(self.url)
+                        time.sleep(5)
+                        self.login_if_needed()
+                else:
+                    print(f"Número máximo de tentativas atingido para {accommodations} acomodações.")
+                    return
+        
+        # REMOVER ESTE BLOCO DUPLICADO:
+        # except Exception as e:
+        #     print(f"Erro crítico ao extrair preços para {accommodations} acomodações: {e}")
+        #     retries += 1
+        #     if retries < max_retries:
+        #         print("Tentando reiniciar o navegador...")
+        #         try:
+        #             self.driver.quit()
+        #         except:
+        #             pass
+        #         self.setup_driver()
+        #         self.driver.get(self.url)
+        #         time.sleep(5)
+        #         self.login_if_needed()
+        #     else:
+        #         print(f"Falha após {max_retries} tentativas. Pulando {accommodations} acomodações.")
+        #         return
+
     def run(self):
         """Executa o monitoramento de preços"""
         try:
@@ -286,13 +346,19 @@ class StaysPriceMonitor:
             # Define o intervalo de acomodações para extrair (de 5 a 199)
             accommodation_values = list(range(5, 200))
             
-            # Para evitar sobrecarga, podemos usar um passo maior
-            # Por exemplo, pegar a cada 5 valores: 5, 10, 15, 20, etc.
-            # Descomente a linha abaixo se quiser usar um passo maior
-            # accommodation_values = list(range(5, 200, 5))
+            # Comentando a linha abaixo para usar todos os valores de 5 a 199
+            # accommodation_values = list(range(5, 200, 5))  # Usando passo de 5 para reduzir o número de requisições
+            
+            # Salva o último valor processado para permitir retomada
+            last_processed_index = 0
             
             # Extrai preços para cada configuração de acomodações
             for i, accommodations in enumerate(accommodation_values):
+                # Pula valores já processados em caso de retomada
+                if i < last_processed_index:
+                    print(f"Pulando {accommodations} acomodações (já processado)...")
+                    continue
+                
                 # Adiciona um atraso aleatório entre as extrações para evitar bloqueios
                 if i > 0:  # Não precisamos de atraso para a primeira execução
                     time.sleep(random.uniform(2, 4))
@@ -300,16 +366,30 @@ class StaysPriceMonitor:
                 # Extrai os preços para a configuração atual
                 self.extract_prices(accommodations)
                 
+                # Atualiza o último valor processado
+                last_processed_index = i + 1
+                
                 # Após cada extração, voltamos à página inicial para garantir um estado limpo
-                # Isso garante que o botão será clicado novamente para cada configuração
                 if accommodations != accommodation_values[-1]:  # Não precisamos recarregar após a última extração
                     print("Recarregando a página para a próxima configuração...")
-                    self.driver.refresh()
-                    time.sleep(3)  # Aguarda o carregamento da página
+                    try:
+                        self.driver.refresh()
+                        time.sleep(3)  # Aguarda o carregamento da página
+                    except Exception as e:
+                        print(f"Erro ao recarregar a página: {e}")
+                        print("Tentando reiniciar o navegador...")
+                        try:
+                            self.driver.quit()
+                        except:
+                            pass
+                        self.setup_driver()
+                        self.driver.get(self.url)
+                        time.sleep(5)
+                        self.login_if_needed()
                 
-                # Opcional: salvar dados parciais a cada 10 extrações para evitar perda de dados
-                if i > 0 and i % 10 == 0:
-                    print(f"Salvando dados parciais após {i} extrações...")
+                # Salvar dados parciais a cada 5 extrações para evitar perda de dados
+                if i > 0 and i % 5 == 0:
+                    print(f"Salvando dados parciais após {i+1} extrações...")
                     self.save_to_excel(partial=True)
             
             # Salva os dados extraídos
@@ -324,7 +404,10 @@ class StaysPriceMonitor:
         
         finally:
             # Fecha o navegador
-            self.driver.quit()
+            try:
+                self.driver.quit()
+            except:
+                pass
             print("Monitoramento concluído.")
 
     def save_to_excel(self, partial=False, error=False):
